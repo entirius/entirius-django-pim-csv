@@ -17,6 +17,7 @@ from django_utils.api.utils import make_media_url
 
 from ..bi import AttributesImportFromCsvEvent
 from ..csv.attributes import COL_DISPLAY_ORDER, COL_EXT, COL_GROUP_IDX, COL_IDX, AttributesCsv
+from ..settings import DELETE_ATTRIBUTES_NOT_IN_CSV
 from .abstract import AbstractSync
 
 COL_ImportStatus = "import status"
@@ -118,6 +119,8 @@ class AttributesImporter(AbstractSync):
         return attr_picture
 
     def delete_not_in_csv(self, idx_list):
+        if not (DELETE_ATTRIBUTES_NOT_IN_CSV or self.delete):
+            return
         Attribute.objects.filter(feature=self.feature).exclude(idx__in=idx_list).delete()
 
     def import_attributes(self, csv):
@@ -133,7 +136,7 @@ class AttributesImporter(AbstractSync):
                 break
             self.report["count_processed_rows"] += 1
             self.import_attr(csv=csv, row=row, row_nr=row_nr)
-            idx_list.append(csv.get_row_value(row, COL_IDX))
+            idx_list.append(normalize_idx(csv.get_row_value(row, COL_IDX)))
             print(".", end="", flush=True)
 
         self.delete_not_in_csv(idx_list)

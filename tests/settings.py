@@ -4,6 +4,8 @@
 
 import os
 
+import dj_database_url
+
 # PATHS — django_pim reads TMP_DIR at import time
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, "."))
@@ -68,12 +70,10 @@ TEMPLATES = [
     }
 ]
 
-# No models in django_pim_csv — smoke tests never touch the database.
+# django_pim_csv has no models of its own, but the importers write through django_pim,
+# which needs postgres. CI provides DATABASE_URL, locally point it at any postgres 15+.
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": ":memory:",
-    }
+    "default": dj_database_url.config(default="postgresql://postgres:postgres@localhost:5432/test"),
 }
 
 LANGUAGE_CODE = "en-us"
