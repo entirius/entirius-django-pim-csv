@@ -159,29 +159,43 @@ python manage.py config-load-pim-features <file_path>
 |----------|----------|-------------|
 | `file_path` | yes | Path to features configuration CSV |
 
+The import runs in one transaction. Any rejected row — an unknown type, a scope change on an
+existing feature, a database error — rolls the whole file back and exits non-zero with one line
+per rejected row. A held import lock also exits non-zero.
+
 ## config-load-pim-features-sets
 
 Load feature set definitions (groupings of related features).
 
 ```bash
-python manage.py config-load-pim-features-sets <file_path>
+python manage.py config-load-pim-features-sets <file_path> [--prune [--dry-run]]
 ```
 
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `file_path` | yes | Path to feature sets configuration CSV |
+| `--prune` | no | Detach features the CSV does not list, in the sets the CSV names; other sets are untouched |
+| `--dry-run` | no | With `--prune`: list what would be detached, write nothing |
+
+Without `--prune` the import only adds memberships. An unknown feature idx rejects the row;
+any rejected row rolls the whole file back and exits non-zero.
 
 ## config-load-pim-feature-position-in-features-sets
 
 Map features to feature sets with display order.
 
 ```bash
-python manage.py config-load-pim-feature-position-in-features-sets <file_path>
+python manage.py config-load-pim-feature-position-in-features-sets <file_path> [--prune [--dry-run]]
 ```
 
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `file_path` | yes | Path to feature-in-set mapping CSV |
+| `--prune` | no | Remove feature–set pairs the CSV does not list, in the sets the CSV names |
+| `--dry-run` | no | With `--prune`: list what would be removed, write nothing |
+
+A pair is a set membership, so `--prune` here also detaches features: give it a CSV that lists
+every membership of the sets it names. Rejected rows roll the whole file back and exit non-zero.
 
 ## csv-remove-columns
 

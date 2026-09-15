@@ -514,7 +514,7 @@ wheels = [
 
 [[package]]
 name = "entirius-django-pim-csv"
-version = "3.0.0"
+version = "4.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "django", version = "5.2.16", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },

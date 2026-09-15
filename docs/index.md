@@ -46,9 +46,9 @@ Products add a sub-layer with type-specific importers for simple, configurable, 
 | Attribute images | `product-attribute-images-import-from-csv` | shop_idx, file_path |
 | Custom modifiers | `custom-modifiers-attributes-import-from-csv` | file_path |
 | Channels | `config-load-pim-channels` | idx, name, languages, currency |
-| Features | `config-load-pim-features` | idx, type, scope, frontend_input |
-| Feature sets | `config-load-pim-features-sets` | idx, name, is_default |
-| Features in sets | `config-load-pim-feature-position-in-features-sets` | feature_idx, set_idx, position |
+| Features | `config-load-pim-features` | idx, scope, type, name {lang}, required, filterable, searchable, comparable, frontend_input_type, visible |
+| Feature sets | `config-load-pim-features-sets` | idx, name, desc, is-default, features |
+| Features in sets | `config-load-pim-feature-position-in-features-sets` | feature-idx, feature-set-idx, position |
 
 ## Import Order
 

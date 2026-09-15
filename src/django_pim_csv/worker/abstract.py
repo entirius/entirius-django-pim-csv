@@ -6,8 +6,9 @@ import logging
 import os
 import sys
 
+from django.db import transaction
 from django.utils import timezone
-from django_pim.models import Shop
+from django_pim.models import FeatureInFeatureSet, Shop
 from lockfile import LockFile
 
 from django_pim_csv import settings
@@ -17,11 +18,25 @@ from ..settings import SKIP_FILES_DEFAULT, SKIP_LINKING_PRODUCTS_DEFAULT, SKIP_P
 logger = logging.getLogger("django")
 
 
+class ImportRowsError(Exception):
+    """Rows were rejected; the whole import has been rolled back."""
+
+    def __init__(self, errors):
+        self.errors = errors
+        super().__init__(f"{len(errors)} row(s) rejected, nothing imported:\n" + "\n".join(errors))
+
+
 class AbstractSync:
     LOCK_FILE = f"/tmp/_lock_{settings.BI_BUSINESS_UNIT}_csv_import.tmp"
     lock = None
     limit = None  # int or None liczy sie razem z headerem, --limit
     lock_file = True
+    fail_if_locked = False  # True: a held lock exits 1 instead of 0
+    prune = False  # --prune, used by load_atomically
+    dry_run = False  # --dry-run, used by load_atomically
+    errors = None
+    detached = None
+    kept_links = None  # {feature_set_pk: {feature_pk}} named by the CSV
     skip_pictures = SKIP_PICTURES_DEFAULT  # --skip-pictures
     skip_files = SKIP_FILES_DEFAULT  # --skip-files
     skip_linking = SKIP_LINKING_PRODUCTS_DEFAULT  # --skip-linking
@@ -43,7 +58,7 @@ class AbstractSync:
                 m = f"[{now}] Exiting, another instance is running ..."
                 print(m)
                 logger.info(m)
-                sys.exit(0)
+                sys.exit(1 if self.fail_if_locked else 0)
         self.ensure_dir_exists(settings.TMP_DIR)
         self.init_langs()
 
@@ -66,6 +81,35 @@ class AbstractSync:
             col_idx = self.generate_feature_col_idx(idx, lang)
             csv.add_col_config(col_idx=col_idx, is_required=is_required)
             self.info("  - {:28} col_idx = {:32} is_required = {}".format(idx, '"' + col_idx + '"', is_required))
+
+    def load_atomically(self, csv):
+        """Run load_data (and prune) in one transaction; roll back on any row error or dry run."""
+        self.errors, self.detached, self.kept_links = [], [], {}
+        with transaction.atomic():
+            self.load_data(csv)
+            if self.prune:
+                self.prune_links()
+            if self.errors or self.dry_run:
+                transaction.set_rollback(True)
+        if self.errors:
+            raise ImportRowsError(self.errors)
+
+    def row_error(self, row_nr, reason):
+        self.errors.append(f"row {row_nr}: {reason}")
+        self.error(f"row {row_nr}: {reason}")
+
+    def keep_links(self, feature_set, features):
+        self.kept_links.setdefault(feature_set.pk, set()).update(feature.pk for feature in features)
+
+    def prune_links(self):
+        """Delete memberships of the CSV's sets that the CSV does not list, recording each as 'set: feature'."""
+        for feature_set_pk, feature_pks in self.kept_links.items():
+            stale = FeatureInFeatureSet.objects.filter(feature_set_id=feature_set_pk).exclude(
+                feature_id__in=feature_pks
+            )
+            for set_idx, feature_idx in stale.values_list("feature_set__idx", "feature__idx"):
+                self.detached.append(f"{set_idx}: {feature_idx}")
+            stale.delete()
 
     def info(self, msg):
         print(msg, flush=True)

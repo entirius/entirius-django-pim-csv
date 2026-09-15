@@ -5,6 +5,7 @@
 import logging
 
 import pytz
+from django.db import transaction
 from django.utils import timezone
 from django_pim.models import Feature, FeatureScopeEnum, FeatureTypeEnum, FrontendInputTypeEnum
 from django_pim.settings import SYSTEM_FEATURES_IDXS
@@ -31,6 +32,8 @@ logger = logging.getLogger("django")
 
 
 class ConfigFeaturesImporter(AbstractSync):
+    fail_if_locked = True
+
     def __init__(self, file_path: str):
         super().__init__()
         self.file_path = file_path
@@ -136,13 +139,13 @@ class ConfigFeaturesImporter(AbstractSync):
             is_comparable = csv.get_row_value_bool(row, COL_IS_COMPARABLE, default=False)
             is_visible = csv.get_row_value_bool(row, COL_IS_VISIBLE, default=False)
         except Exception as e:
-            raise Exception(f"Invalid data in row {row} {row_nr}: {e}")
+            self.row_error(row_nr, f"invalid data: {e}")
+            return
 
         feature = Feature.objects.filter(idx=idx).first()
         if feature is not None:
             if feature.scope != scope:
-                print(f"Can not change existing features scope, row={row}")
-                logger.exception(f"Can not change existing features scope, row={row}")
+                self.row_error(row_nr, f"can not change scope of existing feature {idx}")
                 return
 
             # import featureów z magento musi umiec nadawać im typy
@@ -152,24 +155,25 @@ class ConfigFeaturesImporter(AbstractSync):
             #     return
 
         try:
-            feature, created = Feature.objects.update_or_create(
-                idx=idx,
-                defaults={
-                    "name_t9n": name_t9n,
-                    "scope": scope,
-                    "feature_type": feature_type,
-                    "is_required": is_required,
-                    "is_filterable": is_filterable,
-                    "is_searchable": is_searchable,
-                    "is_comparable": is_comparable,
-                    "frontend_input_type": frontend_input_type,
-                    "is_visible": is_visible,
-                },
-            )
+            with transaction.atomic():
+                feature, created = Feature.objects.update_or_create(
+                    idx=idx,
+                    defaults={
+                        "name_t9n": name_t9n,
+                        "scope": scope,
+                        "feature_type": feature_type,
+                        "is_required": is_required,
+                        "is_filterable": is_filterable,
+                        "is_searchable": is_searchable,
+                        "is_comparable": is_comparable,
+                        "frontend_input_type": frontend_input_type,
+                        "is_visible": is_visible,
+                    },
+                )
             if created:
                 self.report["count_new"] += 1
         except Exception as e:
-            logger.error(f"Error in row {row_nr}: {e}")
+            self.row_error(row_nr, f"{idx}: {e}")
 
     def load_data(self, csv):
         self.info("Importing:")
@@ -214,7 +218,7 @@ class ConfigFeaturesImporter(AbstractSync):
             csv = ConfigFeaturesCsv()
             self.configure_csv(csv)
             csv.load_file(self.file_path)
-            self.load_data(csv)
+            self.load_atomically(csv)
 
             now = timezone.now().replace(tzinfo=utc_tz)
             now_warsaw = now.astimezone(warsaw_tz)
