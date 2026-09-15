@@ -1532,7 +1532,11 @@ class ProductsImporter(AbstractSync):
             for link_type, list_of_products in linked_product_dict.items():
                 for product_linked in list_of_products:
                     products_link.append(
-                        ProductLink(product=product, link_type=link_type, linked_product=product_linked)
+                        ProductLink(
+                            product=product,
+                            link_type_id=int(link_type) or None,
+                            linked_product=product_linked,
+                        )
                     )
         bulked_links = ProductLink.objects.bulk_create(
             products_link, batch_size=CSV_IMPORT_PRODUCTS_BULK_SIZE, ignore_conflicts=True

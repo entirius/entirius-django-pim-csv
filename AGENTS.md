@@ -176,6 +176,7 @@ All settings read from Django settings via `settings.py`:
 | `BUNDLE_SKU_QUANTITY_SEPARATOR` | `";"` | Separator in bundle SKU:qty pairs |
 | `SKU_LINK_SEPARATOR` | `","` | Separator for linked product SKUs |
 | `ALLOW_CHANGE_PRODUCT_TYPE` | `False` | Allow changing existing product type |
+| `DELETE_ATTRIBUTES_NOT_IN_CSV` | `False` | Delete attributes of the imported feature that the CSV does not list |
 | `SKIP_LINKING_PRODUCTS_DEFAULT` | `False` | Skip product linking by default |
 | `SKIP_PICTURES_DEFAULT` | `False` | Skip image import by default |
 | `SKIP_FILES_DEFAULT` | `False` | Skip file import by default |

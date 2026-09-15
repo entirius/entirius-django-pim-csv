@@ -1,6 +1,6 @@
 [project]
 name = "entirius-django-pim-csv"
-version = "3.0.0"
+version = "4.0.0"
 description = "Bulk CSV import for PIM data: categories, products, attributes, and channel configuration"
 authors = [{ name = "Entirius" }]
 readme = "README.md"
@@ -21,7 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev  = ["ruff", "pre-commit"]
-test = ["pytest", "pytest-django", "psycopg[binary]"]
+test = ["pytest", "pytest-django", "dj-database-url", "psycopg[binary]"]
 
 [project.urls]
 Repository = "https://github.com/entirius/entirius-django-pim-csv"
