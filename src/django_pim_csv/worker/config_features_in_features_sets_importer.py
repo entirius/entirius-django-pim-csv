@@ -5,9 +5,9 @@
 import logging
 
 import pytz
-from django.core.exceptions import ObjectDoesNotExist
+from django.db import transaction
 from django.utils import timezone
-from django_pim.models import Feature, FeatureSet
+from django_pim.models import Feature, FeatureInFeatureSet, FeatureSet
 from django_pim.utils.idx_normalizator import normalize_idx
 
 from ..bi import ConfigFeaturesInFeaturesSetsFromCsvEvent
@@ -23,36 +23,32 @@ logger = logging.getLogger("django")
 
 
 class ConfigFeaturesInFeaturesSetsImporter(AbstractSync):
-    def __init__(self, file_path: str):
+    fail_if_locked = True
+
+    def __init__(self, file_path: str, prune: bool = False, dry_run: bool = False):
         super().__init__()
         self.file_path = file_path
+        self.prune = prune
+        self.dry_run = dry_run
         self.bev = None
         self.report = {}
         self.langs = []
 
     def import_row(self, csv, row, row_nr):
-
-        feature_idx = normalize_idx(csv.get_row_value(row, COL_FEATURE))
-        feature_set_idx = normalize_idx(csv.get_row_value(row, COL_FEATURE_SET))
+        label = f"{csv.get_row_value(row, COL_FEATURE)} in {csv.get_row_value(row, COL_FEATURE_SET)}"
         try:
-            feature = Feature.objects.get(idx=feature_idx)
-            feature_set = FeatureSet.objects.get(idx=feature_set_idx)
-        except ObjectDoesNotExist as e:
-            raise Exception(f"Invalid data in row {row} {row_nr}: {e}")
-
-        try:
-            # if through tabel FeatureInFeatureSet model is not available (add in 1.11 pim) then use Feature model
-            from django_pim.models import FeatureInFeatureSet
-
+            feature = Feature.objects.get(idx=normalize_idx(csv.get_row_value(row, COL_FEATURE)))
+            feature_set = FeatureSet.objects.get(idx=normalize_idx(csv.get_row_value(row, COL_FEATURE_SET)))
             position = csv.get_row_value(row, COL_POSITION)
             position = int(position) if position else 0
-            FeatureInFeatureSet.objects.update_or_create(
-                feature=feature, feature_set=feature_set, defaults={"position": position}
-            )
-        except ImportError:
-            feature.features_sets.add(feature_set)
+            with transaction.atomic():
+                FeatureInFeatureSet.objects.update_or_create(
+                    feature=feature, feature_set=feature_set, defaults={"position": position}
+                )
         except Exception as e:
-            raise Exception(f"Invalid data in row {row} {row_nr}: {e}")
+            self.row_error(row_nr, f"{label}: {e}")
+            return
+        self.keep_links(feature_set, [feature])
 
     def load_data(self, csv):
         self.info("Importing:")
@@ -79,7 +75,7 @@ class ConfigFeaturesInFeaturesSetsImporter(AbstractSync):
         try:
             csv = ConfigFeatureInFeaturesSetsCsv()
             csv.load_file(self.file_path)
-            self.load_data(csv)
+            self.load_atomically(csv)
 
             now = timezone.now().replace(tzinfo=utc_tz)
             now_warsaw = now.astimezone(warsaw_tz)

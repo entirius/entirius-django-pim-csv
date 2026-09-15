@@ -5,6 +5,7 @@
 import logging
 
 import pytz
+from django.db import transaction
 from django.utils import timezone
 from django_pim.models import Feature, FeatureSet
 from django_pim.utils.idx_normalizator import normalize_idx
@@ -17,15 +18,18 @@ logger = logging.getLogger("django")
 
 
 class ConfigFeaturesSetsImporter(AbstractSync):
-    def __init__(self, file_path: str):
+    fail_if_locked = True
+
+    def __init__(self, file_path: str, prune: bool = False, dry_run: bool = False):
         super().__init__()
         self.file_path = file_path
+        self.prune = prune
+        self.dry_run = dry_run
         self.bev = None
         self.report = {}
 
     def import_row(self, csv, row, row_nr):
         features = []
-        features_with_errors = []
         try:
             idx = normalize_idx(csv.get_row_value(row, COL_IDX))
             name = csv.get_row_value(row, COL_NAME)
@@ -35,34 +39,33 @@ class ConfigFeaturesSetsImporter(AbstractSync):
             is_default = csv.get_row_value_bool(row, COL_IS_DEFAULT, default=False)
             features_raw = csv.get_row_value_txt(row, COL_FEATURES)
             for feature_idx in features_raw.split(","):
-                if not feature_idx:
+                if not feature_idx.strip():
                     continue
-                feature_idx = feature_idx.strip()
+                feature_idx = normalize_idx(feature_idx)
                 try:
                     features.append(Feature.objects.get(idx=feature_idx))
                 except Feature.DoesNotExist:
-                    features_with_errors.append(feature_idx)
-                    # print("ERROR: Feature with idx: {} does not exist".format(feature_idx))
-                    continue
+                    self.row_error(row_nr, f"feature {feature_idx} does not exist (set {idx})")
         except Exception as e:
-            raise Exception(f"Invalid data in row {row} {row_nr}: {e}")
+            self.row_error(row_nr, f"invalid data: {e}")
+            return
 
-        feature_set, created = FeatureSet.objects.update_or_create(
-            idx=idx, defaults={"name": name, "desc": desc, "is_default": is_default}
-        )
+        try:
+            with transaction.atomic():
+                feature_set, created = FeatureSet.objects.update_or_create(
+                    idx=idx, defaults={"name": name, "desc": desc, "is_default": is_default}
+                )
+                feature_set.features.add(*features)
+        except Exception as e:
+            self.row_error(row_nr, f"set {idx}: {e}")
+            return
         print("FeatureSet has Features:")
         for feature in features:
             print(f"    - {feature.idx}")
-        if features_with_errors:
-            print("")
-            print("FeatureSet ERRORS with Features:")
-            for feature_idx in features_with_errors:
-                print(f"    - {feature_idx}")
 
         if created:
             self.report["count_new"] += 1
-
-        feature_set.features.add(*features)
+        self.keep_links(feature_set, features)
 
     def load_data(self, csv):
         self.info("Importing:")
@@ -92,7 +95,7 @@ class ConfigFeaturesSetsImporter(AbstractSync):
         try:
             csv = ConfigFeaturesSetsCsv()
             csv.load_file(self.file_path)
-            self.load_data(csv)
+            self.load_atomically(csv)
             now = timezone.now().replace(tzinfo=utc_tz)
             now_warsaw = now.astimezone(warsaw_tz)
             self.info(
