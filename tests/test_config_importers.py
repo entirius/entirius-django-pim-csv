@@ -237,3 +237,101 @@ class TestConfigLoadPimFeaturePositions:
 
         assert links("shoes") == {"color": 5, "legacy": 0}
         assert "Would detach 1" in out
+
+
+REQUIRED_HEADER = "feature-idx,feature-set-idx,position,required\n"
+
+
+def overrides(feature_set_idx):
+    rows = FeatureInFeatureSet.objects.filter(feature_set__idx=feature_set_idx)
+    return dict(rows.values_list("feature__idx", "is_required"))
+
+
+@pytest.mark.django_db
+class TestConfigLoadPimFeaturePositionsRequired:
+    command = "config-load-pim-feature-position-in-features-sets"
+
+    def test_values_map_to_bool_and_none(self, write_csv, make_feature, make_set):
+        make_set("shoes")
+        for idx in ("a", "b", "c", "d"):
+            make_feature(idx)
+        rows = "a,shoes,1,TRUE\nb,shoes,2,false\nc,shoes,3,\nd,shoes,4, True \n"
+        path = write_csv("p.csv", REQUIRED_HEADER + rows)
+
+        run(self.command, path)
+
+        assert overrides("shoes") == {"a": True, "b": False, "c": None, "d": True}
+
+    @pytest.mark.parametrize("junk", ["yes", "1", "maybe", "0"])
+    def test_unknown_text_is_a_row_error(self, junk, write_csv, make_feature, make_set):
+        make_set("shoes")
+        make_feature("color")
+        path = write_csv("p.csv", REQUIRED_HEADER + f"color,shoes,1,{junk}\n")
+
+        with pytest.raises(CommandError, match="row 1"):
+            run(self.command, path)
+
+        assert overrides("shoes") == {}
+
+    @pytest.mark.parametrize("value", ["TRUE", "FALSE"])
+    def test_value_on_system_feature_is_a_row_error(self, value, write_csv, make_feature, make_set):
+        make_set("shoes")
+        make_feature("sys", scope=FeatureScopeEnum.SYSTEM)
+        path = write_csv("p.csv", REQUIRED_HEADER + f"sys,shoes,1,{value}\n")
+
+        with pytest.raises(CommandError, match="row 1"):
+            run(self.command, path)
+
+        assert overrides("shoes") == {}
+
+    def test_blank_on_system_feature_is_fine(self, write_csv, make_feature, make_set):
+        make_set("shoes")
+        make_feature("sys", scope=FeatureScopeEnum.SYSTEM)
+        path = write_csv("p.csv", REQUIRED_HEADER + "sys,shoes,1,\n")
+
+        run(self.command, path)
+
+        assert overrides("shoes") == {"sys": None}
+
+    def test_without_column_overrides_are_left_alone(self, write_csv, make_feature, make_set, link):
+        shoes = make_set("shoes")
+        membership = link(shoes, make_feature("color"))
+        FeatureInFeatureSet.objects.filter(pk=membership.pk).update(is_required=True)
+        path = write_csv("p.csv", POSITIONS_HEADER + "color,shoes,10\n")
+
+        run(self.command, path)
+
+        assert overrides("shoes") == {"color": True}
+
+    def test_blank_with_column_clears_an_override(self, write_csv, make_feature, make_set, link):
+        shoes = make_set("shoes")
+        membership = link(shoes, make_feature("color"))
+        FeatureInFeatureSet.objects.filter(pk=membership.pk).update(is_required=True)
+        path = write_csv("p.csv", REQUIRED_HEADER + "color,shoes,10,\n")
+
+        run(self.command, path)
+
+        assert overrides("shoes") == {"color": None}
+
+    def test_dry_run_lists_changes_and_writes_nothing(self, write_csv, make_feature, make_set, link):
+        shoes = make_set("shoes")
+        link(shoes, make_feature("color"))
+        link(shoes, make_feature("size"))
+        path = write_csv("p.csv", REQUIRED_HEADER + "color,shoes,1,TRUE\nsize,shoes,2,\n")
+
+        out = run(self.command, path, "--dry-run")
+
+        assert "set: color in shoes null→true" in out
+        assert "size in shoes" not in out
+        assert overrides("shoes") == {"color": None, "size": None}
+
+    def test_prune_takes_overrides_with_the_membership(self, write_csv, make_feature, make_set, link):
+        shoes = make_set("shoes")
+        link(shoes, make_feature("color"))
+        legacy = link(shoes, make_feature("legacy"))
+        FeatureInFeatureSet.objects.filter(pk=legacy.pk).update(is_required=True)
+        path = write_csv("p.csv", REQUIRED_HEADER + "color,shoes,1,TRUE\n")
+
+        run(self.command, path, "--prune")
+
+        assert overrides("shoes") == {"color": True}

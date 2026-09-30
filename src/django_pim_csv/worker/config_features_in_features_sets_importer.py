@@ -7,7 +7,7 @@ import logging
 import pytz
 from django.db import transaction
 from django.utils import timezone
-from django_pim.models import Feature, FeatureInFeatureSet, FeatureSet
+from django_pim.models import Feature, FeatureInFeatureSet, FeatureScopeEnum, FeatureSet
 from django_pim.utils.idx_normalizator import normalize_idx
 
 from ..bi import ConfigFeaturesInFeaturesSetsFromCsvEvent
@@ -15,11 +15,16 @@ from ..csv.config_features_in_features_sets import (
     COL_FEATURE,
     COL_FEATURE_SET,
     COL_POSITION,
+    COL_REQUIRED,
     ConfigFeatureInFeaturesSetsCsv,
 )
 from .abstract import AbstractSync
 
 logger = logging.getLogger("django")
+
+
+def _flag(value: bool | None) -> str:
+    return "null" if value is None else str(value).lower()
 
 
 class ConfigFeaturesInFeaturesSetsImporter(AbstractSync):
@@ -33,6 +38,7 @@ class ConfigFeaturesInFeaturesSetsImporter(AbstractSync):
         self.bev = None
         self.report = {}
         self.langs = []
+        self.required_changes = []
 
     def import_row(self, csv, row, row_nr):
         label = f"{csv.get_row_value(row, COL_FEATURE)} in {csv.get_row_value(row, COL_FEATURE_SET)}"
@@ -40,15 +46,34 @@ class ConfigFeaturesInFeaturesSetsImporter(AbstractSync):
             feature = Feature.objects.get(idx=normalize_idx(csv.get_row_value(row, COL_FEATURE)))
             feature_set = FeatureSet.objects.get(idx=normalize_idx(csv.get_row_value(row, COL_FEATURE_SET)))
             position = csv.get_row_value(row, COL_POSITION)
-            position = int(position) if position else 0
+            defaults = {"position": int(position) if position else 0}
+            if csv.exists_col(COL_REQUIRED):
+                defaults["is_required"] = self.parse_required(csv, row, feature)
             with transaction.atomic():
+                self.record_required_change(feature, feature_set, defaults)
                 FeatureInFeatureSet.objects.update_or_create(
-                    feature=feature, feature_set=feature_set, defaults={"position": position}
+                    feature=feature, feature_set=feature_set, defaults=defaults
                 )
         except Exception as e:
             self.row_error(row_nr, f"{label}: {e}")
             return
         self.keep_links(feature_set, [feature])
+
+    @staticmethod
+    def parse_required(csv, row, feature) -> bool | None:
+        value = csv.get_row_value_required(row)
+        if value is not None and feature.scope == FeatureScopeEnum.SYSTEM:
+            raise ValueError(f"{COL_REQUIRED} cannot be set on system feature {feature.idx}")
+        return value
+
+    def record_required_change(self, feature, feature_set, defaults) -> None:
+        if "is_required" not in defaults:
+            return
+        current = FeatureInFeatureSet.objects.filter(feature=feature, feature_set=feature_set).first()
+        before = current.is_required if current else None
+        after = defaults["is_required"]
+        if before != after:
+            self.required_changes.append(f"set: {feature.idx} in {feature_set.idx} {_flag(before)}→{_flag(after)}")
 
     def load_data(self, csv):
         self.info("Importing:")

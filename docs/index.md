@@ -48,7 +48,7 @@ Products add a sub-layer with type-specific importers for simple, configurable, 
 | Channels | `config-load-pim-channels` | idx, name, languages, currency |
 | Features | `config-load-pim-features` | idx, scope, type, name {lang}, required, filterable, searchable, comparable, frontend_input_type, visible |
 | Feature sets | `config-load-pim-features-sets` | idx, name, desc, is-default, features |
-| Features in sets | `config-load-pim-feature-position-in-features-sets` | feature-idx, feature-set-idx, position |
+| Features in sets | `config-load-pim-feature-position-in-features-sets` | feature-idx, feature-set-idx, position, required |
 
 ## Import Order
 

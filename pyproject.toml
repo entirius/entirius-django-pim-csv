@@ -1,6 +1,6 @@
 [project]
 name = "entirius-django-pim-csv"
-version = "4.0.0"
+version = "4.1.0"
 description = "Bulk CSV import for PIM data: categories, products, attributes, and channel configuration"
 authors = [{ name = "Entirius" }]
 readme = "README.md"
@@ -14,7 +14,7 @@ dependencies = [
     "entirius-py-bievents>=2.0.0",
     "entirius-py-idx-normalizator>=2.0.0",
     "entirius-py-lockfile>=2.0.0",
-    "entirius-django-pim>=3.0.0",
+    "entirius-django-pim>=3.3.0",
     "entirius-django-regional>=2.0.0",
     "entirius-django-utils>=2.0.0",
 ]

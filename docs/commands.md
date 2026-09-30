@@ -192,10 +192,22 @@ python manage.py config-load-pim-feature-position-in-features-sets <file_path> [
 |----------|----------|-------------|
 | `file_path` | yes | Path to feature-in-set mapping CSV |
 | `--prune` | no | Remove feature–set pairs the CSV does not list, in the sets the CSV names |
-| `--dry-run` | no | With `--prune`: list what would be removed, write nothing |
+| `--dry-run` | no | List what would change (removed pairs with `--prune`, required overrides), write nothing |
 
 A pair is a set membership, so `--prune` here also detaches features: give it a CSV that lists
 every membership of the sets it names. Rejected rows roll the whole file back and exit non-zero.
+`--prune` deletes a membership together with its `required` override.
+
+Columns: `feature-idx`, `feature-set-idx`, `position` (optional), `required` (optional).
+
+`required` sets the per-set override of the feature's `is_required` flag: `TRUE` or `FALSE`
+(any case), blank for "inherit the feature's own flag". Other text rejects the row, and so does
+a `TRUE`/`FALSE` on a system feature (system features cannot be overridden).
+
+The column is all-or-nothing. Without it, existing overrides stay untouched. With it, the CSV is
+authoritative for every pair it lists: a blank cell resets an existing override to inherit. Pairs
+the CSV does not list keep theirs. `--dry-run` prints each change as
+`set: <feature> in <set> null→true`.
 
 ## csv-remove-columns
 
