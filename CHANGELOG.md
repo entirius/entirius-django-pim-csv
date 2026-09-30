@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.1.0 — 2026-09-30
+
+- `config-load-pim-feature-position-in-features-sets` reads an optional `required` column:
+  `TRUE` / `FALSE` set the per-set override `FeatureInFeatureSet.is_required`, blank clears it
+  (inherit `Feature.is_required`). Anything else, or a value on a system feature, rejects the row.
+- Once the column is present the CSV is authoritative for the pairs it lists: blank resets an
+  existing override to inherit. Without the column, existing overrides are left alone.
+- `--dry-run` now also works without `--prune` and lists override changes as
+  `set: <feature> in <set> null→true`. `--prune` deletes memberships together with their overrides.
+- Requires `entirius-django-pim>=3.3.0`. The lock file is refreshed once that release is on PyPI.
+
 ## 4.0.0 — 2026-09-15
 
 - **Breaking:** `config-load-pim-features`, `config-load-pim-features-sets` and
