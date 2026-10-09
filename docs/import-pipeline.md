@@ -221,3 +221,94 @@ Each import emits business intelligence events:
 | `ConfigImportFromCsvEvent` | Config import completes |
 
 Events include: source (`django-pim-csv`), environment, business unit, file path, shop, and row counts.
+
+## Importer Internals
+
+Patterns for changing or adding an importer.
+
+### Importer Lifecycle
+
+Every importer follows this sequence:
+
+1. **`__init__()`** — Setup + acquire lock file (`/tmp/_lock_{BI_BUSINESS_UNIT}_csv_import.tmp`)
+2. **`configure_csv()`** — Register columns, set up t9n columns from shop languages
+3. **`start()`** — Orchestrate: open CSV, validate headers, iterate rows, import each
+4. Entity-specific import methods — Create/update Django ORM objects
+
+Management commands instantiate the worker, call chainable setters (`.set_update_only()`,
+`.set_delete()`, etc.), then call `.start()`.
+
+### Translation (t9n) Validation
+
+Importers validate that required translation fields are filled for all shop languages. The pattern
+uses a `required_t9n_fields` list of tuples.
+
+**To add a new validated t9n field**, append a tuple `(field_key, field_name, hint)` to the list:
+
+```python
+required_t9n_fields = [
+    ("url_key_t9n", "URL key", "Category will have no URL for these languages"),
+    ("name_t9n", "name", "Category will display without a name for these languages"),
+]
+```
+
+`validate_row()` iterates this list and logs errors with the category idx and row number when
+languages are missing. This pattern is established in `categories_importer.py` and should be
+replicated in `products_importer.py` when product-level t9n validation is needed.
+
+### `init_langs()` Gotcha
+
+`init_langs()` pulls languages from ALL shops in the system, not just the target shop. This means
+t9n dicts get empty strings for languages not in the target shop. `update_value_t9n()` handles this
+with a truthy check (`if value:`). Do not remove that check.
+
+### `self.error()` vs `logger.error()`
+
+- **`self.error(msg)`** — Prints to stdout. Use for issues operators should see during import runs.
+- **`logger.error(msg)`** — Writes to log file only. Use for technical errors not relevant to operators.
+- **`self.info(msg)`** — Stdout progress info. Use sparingly — bulk imports generate noise.
+
+### Adding a New Importer
+
+1. Create CSV class in `csv/new_entity.py`:
+   - Inherit `CommonCsv`
+   - Define `cols` (all columns) and `cols_required` (must-have columns)
+   - Define column constants at module level
+
+2. Create worker in `worker/new_entity_importer.py`:
+   - Inherit `AbstractSync`
+   - Implement `configure_csv()` and `start()`
+   - Use `self.csv` for row iteration, `self.info()`/`self.error()` for output
+
+3. Create management command in `management/commands/new-entity-import-from-csv.py`:
+   - Instantiate worker, call setters, call `.start()`
+   - Follow existing argument patterns (`shop_idx`, `file_path`, `--update-only`, `--limit`)
+
+### CSV Column Definition Pattern
+
+Each CSV type defines columns as module-level constants, then registers them:
+
+```python
+COL_idx = "idx"
+COL_Parent = "parent"
+COL_is_enabled = "is_enabled"
+
+class CategoriesCsv(CommonCsv):
+    def __init__(self):
+        super().__init__()
+        self.name = "Categories CSV"
+        self.cols = [COL_idx, COL_Parent, COL_is_enabled, ...]
+        self.cols_required = [COL_idx, COL_Parent]
+```
+
+Translation columns are added dynamically at runtime based on shop languages: `"name en"`, `"name pl"`, etc.
+
+### Product Type Dispatch
+
+`products_importer.py` detects product type from the `product type` CSV column and delegates to:
+- `ProductsSimpleImporter` — standard products
+- `ProductsConfigurableImporter` — parent with variants (uses `config_features`, `config_sku`)
+- `ProductsBundleImporter` — bundle products (uses `bundle_sku`, `bundle_idx`)
+- `ProductsCustomImporter` — custom product type
+
+All inherit from `ProductsImportBase` in `products_type_importer/products_base.py`.
