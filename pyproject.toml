@@ -1,7 +1,21 @@
 [project]
 name = "entirius-django-pim-csv"
 version = "4.1.0"
-description = "Bulk CSV import for PIM data: categories, products, attributes, and channel configuration"
+description = "Bulk CSV import for the Entirius product catalog: categories, products, attributes and channel configuration"
+keywords = ["django", "pim", "csv", "import", "ecommerce", "entirius"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Framework :: Django",
+    "Framework :: Django :: 5.2",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+]
 authors = [{ name = "Entirius" }]
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,7 +38,11 @@ dev  = ["ruff", "pre-commit"]
 test = ["pytest", "pytest-django", "dj-database-url", "psycopg[binary]"]
 
 [project.urls]
+Homepage = "https://docs.entirius.com/"
+Documentation = "https://github.com/entirius/entirius-django-pim-csv/tree/develop/docs"
 Repository = "https://github.com/entirius/entirius-django-pim-csv"
+Changelog = "https://github.com/entirius/entirius-django-pim-csv/blob/develop/CHANGELOG.md"
+Issues = "https://github.com/entirius/entirius-django-pim-csv/issues"
 
 [build-system]
 requires = ["hatchling"]

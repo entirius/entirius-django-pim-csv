@@ -1,10 +1,8 @@
 # AGENTS.md
 
-Bulk CSV importer for PIM data: categories, products, attributes, prices, quantities — distribution
-`entirius-django-pim-csv`, Django app `django_pim_csv`. Reads CSV files, validates, and writes to
+`entirius-django-pim-csv` (Django app `django_pim_csv`) — bulk CSV importer of Entirius for PIM data: categories,
+products, attributes, prices, quantities. Reads CSV files, validates, and writes to
 django-pim models via Django ORM.
-
-**Tech:** Python >=3.11, Django >=5.0, entirius-django-pim
 
 ## Commands
 
@@ -15,6 +13,8 @@ django-pim models via Django ORM.
 | `make fix` | auto-fix lint + format |
 | `make test` | test suite (pytest + pytest-django) |
 
+Tests need PostgreSQL: set `DATABASE_URL` (the default in `tests/settings.py` points at a local postgres).
+
 ## Conventions
 
 - English only: code, docs, commits, branches, PRs.
@@ -24,6 +24,7 @@ django-pim models via Django ORM.
 - Never rename the package / Django app_label / DB table prefix `django_pim_csv` — it is a schema contract.
 - Migrations are part of the public contract — never edit an already released migration.
 - Default: do not commit — git is the user's call.
+- No AI attribution in commits or PR descriptions.
 
 ## Architecture
 
@@ -42,116 +43,30 @@ Each entity type (categories, products, attributes, config) has:
 Products have an additional sub-layer: type-specific importers in `worker/products_type_importer/`
 (simple, configurable, bundle, custom).
 
-## File Map
-
 | Path | Purpose |
 |------|---------|
 | `src/django_pim_csv/csv/common.py` | Base CSV parser — header discovery, type conversion, iteration |
 | `src/django_pim_csv/csv/categories.py` | Category CSV column definitions |
-| `src/django_pim_csv/csv/products.py` | Product CSV columns (126 columns) |
+| `src/django_pim_csv/csv/products.py` | Product CSV columns |
 | `src/django_pim_csv/csv/attributes.py` | Attribute CSV columns |
 | `src/django_pim_csv/csv/products_position.py` | Product position columns |
 | `src/django_pim_csv/csv/config_*.py` | Configuration CSV columns (channels, features, feature sets) |
 | `src/django_pim_csv/worker/abstract.py` | AbstractSync base class — lock, config, t9n, progress |
 | `src/django_pim_csv/worker/categories_importer.py` | Category hierarchy import with t9n validation |
-| `src/django_pim_csv/worker/products_importer.py` | Product import orchestrator (1694 lines) |
+| `src/django_pim_csv/worker/products_importer.py` | Product import orchestrator |
 | `src/django_pim_csv/worker/attributes_importer.py` | Attribute value import |
 | `src/django_pim_csv/worker/products_type_importer/` | Type-specific: simple, configurable, bundle, custom |
 | `src/django_pim_csv/worker/config_*_importer.py` | Configuration importers |
-| `src/django_pim_csv/management/commands/` | 10 management commands |
+| `src/django_pim_csv/management/commands/` | Management commands (kebab-case filenames) |
 | `src/django_pim_csv/settings.py` | All configurable settings with defaults |
 | `src/django_pim_csv/bi.py` | Business Intelligence event definitions |
 
-## Key Patterns
+Importer lifecycle: `__init__()` (setup + lock file) → `configure_csv()` (columns, t9n columns from shop languages)
+→ `start()` (open CSV, validate headers, iterate rows). Management commands instantiate the worker, call chainable
+setters (`.set_update_only()`, `.set_delete()`, …), then `.start()`. Product rows dispatch by the `product type`
+column to the importers in `worker/products_type_importer/`.
 
-### Importer Lifecycle
-
-Every importer follows this sequence:
-
-1. **`__init__()`** — Setup + acquire lock file (`/tmp/_lock_{BI_BUSINESS_UNIT}_csv_import.tmp`)
-2. **`configure_csv()`** — Register columns, set up t9n columns from shop languages
-3. **`start()`** — Orchestrate: open CSV, validate headers, iterate rows, import each
-4. Entity-specific import methods — Create/update Django ORM objects
-
-Management commands instantiate the worker, call chainable setters (`.set_update_only()`,
-`.set_delete()`, etc.), then call `.start()`.
-
-### Translation (t9n) Validation
-
-Importers validate that required translation fields are filled for all shop languages. The pattern
-uses a `required_t9n_fields` list of tuples.
-
-**To add a new validated t9n field**, append a tuple `(field_key, field_name, hint)` to the list:
-
-```python
-required_t9n_fields = [
-    ("url_key_t9n", "URL key", "Category will have no URL for these languages"),
-    ("name_t9n", "name", "Category will display without a name for these languages"),
-]
-```
-
-`validate_row()` iterates this list and logs errors with the category idx and row number when
-languages are missing. This pattern is established in `categories_importer.py` and should be
-replicated in `products_importer.py` when product-level t9n validation is needed.
-
-### `init_langs()` Gotcha
-
-`init_langs()` pulls languages from ALL shops in the system, not just the target shop. This means
-t9n dicts get empty strings for languages not in the target shop. `update_value_t9n()` handles this
-with a truthy check (`if value:`). Do not remove that check.
-
-### `self.error()` vs `logger.error()`
-
-- **`self.error(msg)`** — Prints to stdout. Use for issues operators should see during import runs.
-- **`logger.error(msg)`** — Writes to log file only. Use for technical errors not relevant to operators.
-- **`self.info(msg)`** — Stdout progress info. Use sparingly — bulk imports generate noise.
-
-### Adding a New Importer
-
-1. Create CSV class in `csv/new_entity.py`:
-   - Inherit `CommonCsv`
-   - Define `cols` (all columns) and `cols_required` (must-have columns)
-   - Define column constants at module level
-
-2. Create worker in `worker/new_entity_importer.py`:
-   - Inherit `AbstractSync`
-   - Implement `configure_csv()` and `start()`
-   - Use `self.csv` for row iteration, `self.info()`/`self.error()` for output
-
-3. Create management command in `management/commands/new-entity-import-from-csv.py`:
-   - Instantiate worker, call setters, call `.start()`
-   - Follow existing argument patterns (`shop_idx`, `file_path`, `--update-only`, `--limit`)
-
-### CSV Column Definition Pattern
-
-Each CSV type defines columns as module-level constants, then registers them:
-
-```python
-COL_idx = "idx"
-COL_Parent = "parent"
-COL_is_enabled = "is_enabled"
-
-class CategoriesCsv(CommonCsv):
-    def __init__(self):
-        super().__init__()
-        self.name = "Categories CSV"
-        self.cols = [COL_idx, COL_Parent, COL_is_enabled, ...]
-        self.cols_required = [COL_idx, COL_Parent]
-```
-
-Translation columns are added dynamically at runtime based on shop languages: `"name en"`, `"name pl"`, etc.
-
-### Product Type Dispatch
-
-`products_importer.py` detects product type from the `product type` CSV column and delegates to:
-- `ProductsSimpleImporter` — standard products
-- `ProductsConfigurableImporter` — parent with variants (uses `config_features`, `config_sku`)
-- `ProductsBundleImporter` — bundle products (uses `bundle_sku`, `bundle_idx`)
-- `ProductsCustomImporter` — custom product type
-
-All inherit from `ProductsImportBase` in `products_type_importer/products_base.py`.
-
-## Module Conventions
+Module conventions:
 
 - **`normalize_idx(value)`** — Call for all idx values before DB lookup. Uses `entirius-py-idx-normalizator`.
 - **`normalize_sku(value)`** — Call for all SKU values. Strips whitespace, lowercases.
@@ -162,6 +77,14 @@ All inherit from `ProductsImportBase` in `products_type_importer/products_base.p
   `"17,5"` all normalize to proper Decimals.
 - **Boolean parsing** — Recognizes: `"yes"`, `"true"`, `"1"`, `"prawda"` (Polish for "true").
 - **Separator conventions** — SKU links: `,`, bundle SKU:qty: `;`, image main:category: `;`, categories: `,` or `;`.
+
+| Topic | Where |
+|---|---|
+| Overview, supported entity types, import order | `docs/index.md` |
+| Import modes, ordering, error handling, concurrency, importer internals (lifecycle, t9n validation, adding an importer) | `docs/import-pipeline.md` |
+| CSV columns and naming conventions | `docs/csv-format.md` |
+| Management commands | `docs/commands.md` |
+| Usage guides | https://docs.entirius.com/ |
 
 ## Settings
 
@@ -181,13 +104,10 @@ All settings read from Django settings via `settings.py`:
 | `SKIP_PICTURES_DEFAULT` | `False` | Skip image import by default |
 | `SKIP_FILES_DEFAULT` | `False` | Skip file import by default |
 
-## Dependencies
+## Gotchas
 
-Core: `entirius-django-pim`, `entirius-django-regional`, `entirius-django-utils`,
-`entirius-py-lockfile`, `entirius-py-bievents`, `entirius-py-idx-normalizator`.
-
-## User-Facing Documentation
-
-Usage guides, CSV format specs, and command reference live in
-[entirius-docs](https://docs.entirius.com/volkanos/modules/pim-csv/). This AGENTS.md covers
-development patterns only.
+- `init_langs()` pulls languages from ALL shops, not just the target shop: t9n dicts get empty strings for the
+  other languages. `update_value_t9n()` handles this with a truthy check (`if value:`) — do not remove it.
+- `self.error(msg)` / `self.info(msg)` print to stdout for the operator running the import; `logger.error(msg)`
+  writes to the log file only. Use `self.info()` sparingly — bulk imports generate noise.
+- `T9N_DEFAULT_LANG` has no default: `settings.py` reads it at import time and fails when it is unset.
